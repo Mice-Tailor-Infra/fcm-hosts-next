@@ -57,11 +57,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            scripts
-            requirements.txt
-          sparse-checkout-cone-mode: false
 
       - name: Configure SSH for GitHub
         run: |
