@@ -17,9 +17,12 @@ from threading import Lock
 import time
 from datetime import datetime, timezone
 
-# FCM 目标域名列表
+# FCM 目标域名列表 - 十二金刚防御阵列
 FCM_DOMAINS = [
     "mtalk.google.com",
+    "mtalk4.google.com",
+    "mtalk-staging.google.com",
+    "mtalk-dev.google.com",
     "alt1-mtalk.google.com",
     "alt2-mtalk.google.com",
     "alt3-mtalk.google.com",
@@ -227,8 +230,8 @@ class AdaptiveSelector:
         # 按延迟从低到高排序
         sorted_results = sorted(successful, key=lambda x: x.latency_ms)
 
-        # 动态截断: 保留前 9 名 (对应 9 个 FCM 域名)
-        target_count = len(FCM_DOMAINS) * MIN_IPS_PER_DOMAIN  # 至少 9 个
+        # 动态截断: 保留前 12 名 (对应 12 个 FCM 域名)
+        target_count = len(FCM_DOMAINS) * MIN_IPS_PER_DOMAIN  # 至少 12 个
 
         if len(sorted_results) > target_count:
             top_ips = sorted_results[:target_count]
