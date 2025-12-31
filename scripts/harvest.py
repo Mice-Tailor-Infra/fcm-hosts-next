@@ -9,8 +9,11 @@ Harvest: DNS 采集器 (US 环境运行)
 import dns.message
 import dns.query
 import dns.rdatatype
+import dns.edns
 import ipaddress
-from typing import Set, Tuple
+from typing import Set
+from dns.rdatatype import RdataType
+
 
 # Google 权威 DNS 服务器 (IPv4)
 GOOGLE_DNS_SERVERS = [
@@ -60,52 +63,34 @@ OUTPUT_V4 = "raw_ips_v4.txt"
 OUTPUT_V6 = "raw_ips_v6.txt"
 
 
-def create_ecs_option(subnet: str) -> bytes:
+def parse_subnet(subnet: str) -> tuple[str, int]:
     """
-    构造 EDNS Client Subnet OPT 记录数据
+    解析子网字符串为 (address, prefix_len)
 
     Args:
-        subnet: IP 子网，如 "240e::/24" 或 "1.0.0.0/8"
+        subnet: 子网字符串，如 "1.0.0.0/8" 或 "240e::/12"
 
     Returns:
-        ECS OPT 数据 bytes
+        (地址, 前缀长度) 元组
     """
     network = ipaddress.ip_network(subnet, strict=False)
-    addr_bytes = network.network_address.packed
-    prefix_len = network.prefixlen
-
-    # IPv4 family = 1, IPv6 family = 2
-    family = 1 if network.version == 4 else 2
-
-    # ECS 数据格式: family(2) + source_prefix(1) + scope_prefix(1) + addr_bytes
-    ecs_data = bytes([0, family, prefix_len, prefix_len]) + addr_bytes
-
-    return ecs_data
+    return (str(network.network_address), network.prefixlen)
 
 
-def create_query_with_ecs(qname: str, rdtype: int) -> dns.message.Message:
+def create_ecs_option(subnet: str) -> dns.edns.ECSOption:
     """
-    创建带 ECS 的 DNS 查询消息
+    创建 EDNS Client Subnet OPT 记录
 
     Args:
-        qname: 查询域名
-        rdtype: 记录类型 (A=1 或 AAAA=28)
+        subnet: 子网字符串，如 "1.0.0.0/8" 或 "240e::/12"
 
     Returns:
-        DNS 查询消息
+        ECSOption 实例
     """
-    msg = dns.message.make_query(qname, rdtype, want_dnssec=False)
-
-    # 创建 EDNS0 OPT 记录，包含 ECS 信息
-    # 使用第一个 IPv4 子网作为默认 ECS
-    ecs_subnet = CHINA_BACKBONE_V4[0] if rdtype == 1 else CHINA_BACKBONE_V6[0]
-    ecs_data = create_ecs_option(ecs_subnet)
-
-    # 添加 EDNS0 选项
-    edns = dns.edns.ECSOption(8, ecs_data)
-    msg.use_edns(ednsflags=0, options=[edns])
-
-    return msg
+    address, prefix_len = parse_subnet(subnet)
+    # ECSOption(address, srclen, scopelen)
+    # srclen=None 表示使用默认值 (IPv4=24, IPv6=56)
+    return dns.edns.ECSOption(address, srclen=prefix_len, scopelen=0)
 
 
 def query_with_ecs(dns_server: str, qname: str, rdtype: int,
@@ -117,7 +102,7 @@ def query_with_ecs(dns_server: str, qname: str, rdtype: int,
         dns_server: DNS 服务器 IP
         qname: 查询域名
         rdtype: 记录类型 (A=1 或 AAAA=28)
-        ecs_subnet: ECS 子网
+        ecs_subnet: ECS 子网 (如 "1.0.0.0/8" 或 "240e::/12")
         timeout: 超时时间(秒)
 
     Returns:
@@ -126,9 +111,8 @@ def query_with_ecs(dns_server: str, qname: str, rdtype: int,
     msg = dns.message.make_query(qname, rdtype, want_dnssec=False)
 
     # 添加 ECS 选项
-    ecs_data = create_ecs_option(ecs_subnet)
-    edns = dns.edns.ECSOption(8, ecs_data)
-    msg.use_edns(ednsflags=0, options=[edns])
+    ecs_opt = create_ecs_option(ecs_subnet)
+    msg.use_edns(ednsflags=0, options=[ecs_opt])
 
     try:
         response = dns.query.udp(msg, dns_server, timeout=timeout, port=53)
