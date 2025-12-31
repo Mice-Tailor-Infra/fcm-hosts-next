@@ -109,10 +109,10 @@ jobs:
           name: fcm-hosts
           path: .
 
-      - name: Display hosts files
+      - name: Verify artifact download
         run: |
           echo "=== Hosts files to publish ==="
-          ls -la fcm_*.hosts
+          ls -la fcm_*.hosts || { echo "ERROR: No hosts files found!"; exit 1; }
 
       - name: Configure Git
         run: |
