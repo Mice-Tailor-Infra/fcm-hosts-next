@@ -57,7 +57,12 @@ jobs:
     steps:
       - name: Clone repository
         run: |
+          WORKDIR=$(mktemp -d)
+          cd "$WORKDIR"
           git clone --depth 1 ssh://git@ssh.github.com:443/cagedbird043/fcm-hosts-next.git .
+          cp -r .git scripts requirements.txt "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+          rm -rf "$WORKDIR"
 
       - name: Download raw IPs artifacts
         uses: actions/download-artifact@v4
