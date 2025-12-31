@@ -1,0 +1,19 @@
+title: FCM Hosts Next
+description: Global Distributed Optimization for Firebase Cloud Messaging
+theme: jekyll-theme-primer
+
+# 核心：彻底排除会导致 Jekyll 构建报错或产生冗余内容的目录
+exclude:
+  - scripts/ # 脚本目录不需要渲染
+  - .github/ # 工作流目录
+  - requirements.txt # 依赖文件
+  - .gitignore
+  - LICENSE
+  - raw_ips_v4.txt # 中间产物
+  - raw_ips_v6.txt
+
+# 显式包含我们的核心产物，确保它们能通过 miceworld.top 访问
+include:
+  - fcm_ipv4.hosts
+  - fcm_ipv6.hosts
+  - fcm_dual.hosts
