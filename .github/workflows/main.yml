@@ -48,7 +48,7 @@ jobs:
 
   verify:
     needs: harvest
-    runs-on: [self-hosted, AliYun-ECS]
+    runs-on: self-hosted
     name: Verify and Select Premium IPs
 
     steps:
