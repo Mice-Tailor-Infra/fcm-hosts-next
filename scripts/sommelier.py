@@ -90,31 +90,45 @@ class TCPSpeedometer:
 
 
 class CSegmentExpander:
-    """C 段爆破器"""
+    """C 段爆破器 (精准扩充，防扫描策略)"""
+
+    EXPAND_WINDOW = 10  # 前后各 10 个地址，Window Size = 20
 
     @staticmethod
     def expand_c_segment(ip: str) -> List[str]:
-        """扩展 IPv4 C 段: 1.2.3.4 -> 1.2.3.1 到 1.2.3.254"""
+        """扩展 IPv4: 种子 IP 前后 10 个地址 (Window Size = 20)
+        例如: 1.2.3.188 -> 1.2.3.178 到 1.2.3.198
+        """
         parts = ip.split('.')
         if len(parts) != 4:
             return [ip]
+        try:
+            last_octet = int(parts[3])
+        except ValueError:
+            return [ip]
+
         prefix = '.'.join(parts[:3]) + '.'
-        return [f"{prefix}{i}" for i in range(1, 255)]
+        start = max(1, last_octet - CSegmentExpander.EXPAND_WINDOW)
+        end = min(254, last_octet + CSegmentExpander.EXPAND_WINDOW)
+        return [f"{prefix}{i}" for i in range(start, end + 1)]
 
     @staticmethod
     def expand_ipv6_block(ip: str) -> List[str]:
-        """扩展 IPv6 /124 段"""
-        # 简化处理：取前 7 个 16 位组作为前缀
+        """扩展 IPv6 /124 段: 只测试最后 16 个地址 (0 到 f)
+        相比原来的 8 个地址，范围扩大一倍但更精准
+        """
         parts = ip.split(':')
         if len(parts) < 2:
             return [ip]
-        # 找到最后一个完整段的位置
+
+        # 取前 7 个 16 位组作为前缀
         prefix_parts = parts[:7] if len(parts) >= 7 else parts
         prefix = ':'.join(prefix_parts)
         if not prefix.endswith(':'):
             prefix += ':'
-        # 扩展最后 8 个地址
-        return [f"{prefix}{i:x}" for i in range(8)]
+
+        # 扩展最后 16 个地址 (0-f)
+        return [f"{prefix}{i:x}" for i in range(16)]
 
 
 class AdaptiveSelector:
@@ -146,9 +160,10 @@ class AdaptiveSelector:
         return ip
 
     def expand_and_rescan(self, initial_ips: List[str]) -> List[SpeedResult]:
-        """C 段爆破 + 重新扫描"""
-        # 首次扫描
+        """C 段爆破 + 重新扫描 (防扫描策略)"""
+        # 首次扫描 - 先 shuffle 打破顺序
         print(f"  Initial scan: {len(initial_ips)} IPs...")
+        random.shuffle(initial_ips)  # 防止顺序扫描被识别
         initial_results = batch_measure(initial_ips, timeout=self.timeout, max_workers=self.max_workers)
 
         # 找出成功的 IP，按网段分组
@@ -175,11 +190,9 @@ class AdaptiveSelector:
         ips_to_rescan = []
         for block, success_ips in blocks.items():
             if ':' in block:  # IPv6
-                # 取一个成功 IP 作为种子扩展
                 seed = success_ips[0].ip
                 expanded = CSegmentExpander.expand_ipv6_block(seed)
             else:  # IPv4
-                # 取一个成功 IP 作为种子扩展
                 seed = success_ips[0].ip
                 expanded = CSegmentExpander.expand_c_segment(seed)
 
@@ -193,8 +206,9 @@ class AdaptiveSelector:
             print("  No new IPs to expand")
             return initial_results
 
-        # 重新扫描新 IPs
+        # 重新扫描新 IPs - 先 shuffle 打破顺序
         print(f"  Expanding scan: {len(ips_to_rescan)} new IPs...")
+        random.shuffle(ips_to_rescan)  # 防止顺序扫描被识别
         expanded_results = batch_measure(ips_to_rescan, timeout=self.timeout, max_workers=self.max_workers)
 
         # 合并结果
