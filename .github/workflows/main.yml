@@ -87,6 +87,8 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     name: Publish to Repository
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
