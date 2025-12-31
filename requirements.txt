@@ -1,0 +1,4 @@
+# Project Mjolnir - FCM IP Optimization System
+# KISS Principle: Minimal dependencies
+
+dnspython>=2.4.0
