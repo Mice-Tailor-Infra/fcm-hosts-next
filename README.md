@@ -1,38 +1,55 @@
 # FCM Hosts Next
 
-这是一个自动化维护的 Google Firebase Cloud Messaging (FCM) 优选 Hosts 项目。通过分布式边缘探测架构，实时筛选针对中国大陆运营商环境优化的优质边缘节点。
+自动维护 Google Firebase Cloud Messaging (FCM) 优选 Hosts。项目在中国大陆双栈机器上直接采集、实测、发布，目标是给 Android / microG / Google Play services 提供更稳定的 FCM 长连接入口。
 
-## ⚙️ 自动化架构
+## 架构
 
-本项目采用三段式流水线：
+当前生产架构是单机流水线：
 
-1. **数据采集 (Harvest)**：在 GitHub hosted runner 上运行 `scripts/harvest.py`，利用 EDNS Client Subnet (ECS) 模拟国内运营商网段，向 Google 权威 DNS 诱捕候选 IP。
-2. **国内校验 (Sommelier)**：在中国大陆的 self-hosted runner 上运行 `scripts/sommelier.py`，对候选 IP 执行 TCP 5228 真机握手测速与二次扩扫。
-3. **产物发布 (Publish)**：将生成的 `fcm_ipv4.hosts`、`fcm_ipv6.hosts`、`fcm_dual.hosts` 提交回仓库，由 GitHub Pages 对外分发。
+1. **Harvest**：使用 EDNS Client Subnet (ECS) 查询 `mtalk.google.com`，采集候选 IPv4/IPv6。
+2. **Seed**：读取仓库内上一轮成功的 `fcm_*.hosts`，把历史可用 IP 继续作为种子。
+3. **Verify**：在大陆双栈 self-hosted runner 上对候选 IP 执行 TCP `5228` 连接测速。
+4. **Expand**：对已成功 IP 做小范围邻近扩展，再次实测。
+5. **Publish**：生成并提交 `fcm_ipv4.hosts`、`fcm_ipv6.hosts`、`fcm_dual.hosts`。
 
-当前生产 self-hosted runner 已迁移到京东云 BGP 机器，且 `verify` 阶段只依赖 workflow artifact，不再要求国内 runner 直接 `git checkout` 仓库或在线安装 Python 依赖。
+核心实现是 Go 单二进制，无 Python runtime、无 pip 依赖、无跨 runner artifact 搬运。
 
-## 📦 产物列表
+## 产物
 
-本项目默认每 3 小时自动更新一次，产物通过 GitHub Pages 分发。
+- [fcm_dual.hosts](fcm_dual.hosts)：推荐。双栈输出；若某次只选出单栈，会自动降级。
+- [fcm_ipv6.hosts](fcm_ipv6.hosts)：纯 IPv6 输出。
+- [fcm_ipv4.hosts](fcm_ipv4.hosts)：纯 IPv4 输出。
 
-- [fcm_dual.hosts](fcm_dual.hosts): **推荐使用**。双栈负载均衡版本，具备最佳兼容性。
-- [fcm_ipv6.hosts](fcm_ipv6.hosts): 纯 IPv6 版本，适用于拥有 IPv6 环境的移动端或教育网。
-- [fcm_ipv4.hosts](fcm_ipv4.hosts): 纯 IPv4 版本，作为传统环境的补丁。
+默认每 3 小时更新一次。
 
-## 🛠️ 使用方式
+## 使用
 
-数据源通过 `https://miceworld.top/fcm-hosts-next/fcm_dual.hosts` 分发。
+GitHub Pages 分发地址：
 
-- **系统层**：建议通过自动化脚本每 12-24 小时拉取一次内容并原子化覆盖 `/etc/hosts`。
-- **代理层**：可在 Sing-box 或 Clash 配置中通过 `hosts` 模块直接引用下载路径。
+```text
+https://miceworld.top/fcm-hosts-next/fcm_dual.hosts
+```
 
-## 🧭 维护说明
+可用于：
 
-- `harvest` 跑在 GitHub hosted 环境，依赖 `requirements.txt` 中的 `dnspython`。
-- `verify` 跑在大陆 self-hosted 环境，只依赖系统自带 `python3` 和 workflow artifact。
-- workflow 已开启同分支并发收敛，避免 schedule / push / 手动触发相互堆积。
+- 系统 hosts 定时拉取并原子覆盖。
+- sing-box / Clash 的 hosts 数据源。
+
+## 本地运行
+
+```bash
+go test ./...
+go run ./cmd/fcmhost run -workdir .
+```
+
+常用调试：
+
+```bash
+go run ./cmd/fcmhost run -workdir . -dns=false -v
+```
+
+`-dns=false` 只使用现有 hosts/raw seeds 做验证，适合快速确认当前网络能否连通 FCM `5228`。
 
 ---
 
-_Status: Automated / Real-time Verified_
+_Status: Automated / Mainland dual-stack verified_

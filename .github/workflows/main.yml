@@ -2,104 +2,30 @@ name: FCM Hosts Pipeline
 
 on:
   schedule:
-    # 每 3 小时执行一次
     - cron: '0 */3 * * *'
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
-      - 'scripts/**'
+      - 'cmd/**'
+      - 'internal/**'
       - '.github/workflows/**'
-      - 'requirements.txt'
+      - 'go.mod'
+      - 'go.sum'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  PYTHON_VERSION: '3.11'
+permissions:
+  contents: write
 
 jobs:
-  harvest:
-    runs-on: ubuntu-latest
-    name: Harvest IPs from Google DNS
+  update:
+    runs-on: [self-hosted, Linux, X64, tencent-fcm, china-dualstack]
+    name: Harvest, verify, and publish
     timeout-minutes: 20
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run Offline Smoke Tests
-        run: |
-          python -m unittest discover -s tests -p 'test_*.py'
-
-      - name: Run Harvester
-        run: |
-          python scripts/harvest.py
-
-      - name: Upload artifacts (IPs + Scripts)
-        uses: actions/upload-artifact@v7
-        with:
-          name: workspace-data
-          path: |
-            raw_ips_v4.txt
-            raw_ips_v6.txt
-            scripts/
-          retention-days: 1
-
-  verify:
-    needs: harvest
-    runs-on: [self-hosted, Linux, X64, jdcloud, china-bgp]
-    name: Verify and Select Premium IPs
-    timeout-minutes: 15
-
-    steps:
-      - name: Download workspace
-        uses: actions/download-artifact@v8
-        with:
-          name: workspace-data
-          path: .
-
-      - name: Display downloaded files
-        run: |
-          echo "=== Downloaded files ==="
-          ls -la raw_*.txt 2>/dev/null || echo "No raw IP files found"
-
-      - name: Run Sommelier
-        run: |
-          python3 scripts/sommelier.py
-
-      - name: Display generated hosts files
-        run: |
-          echo "=== Generated hosts files ==="
-          ls -la fcm_*.hosts 2>/dev/null || echo "No hosts files found"
-
-      - name: Upload hosts artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: fcm-hosts
-          path: |
-            fcm_ipv4.hosts
-            fcm_dual.hosts
-            fcm_ipv6.hosts
-          retention-days: 1
-
-  publish:
-    needs: verify
-    runs-on: ubuntu-latest
-    name: Publish to Repository
-    timeout-minutes: 10
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout repository
@@ -108,16 +34,19 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Download hosts artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: fcm-hosts
-          path: .
+      - name: Check Go
+        run: go version
 
-      - name: Verify artifact download
+      - name: Test
+        run: go test ./...
+
+      - name: Run FCM host pipeline
+        run: go run ./cmd/fcmhost run -workdir .
+
+      - name: Display generated hosts files
         run: |
-          echo "=== Hosts files to publish ==="
-          ls -la fcm_*.hosts || { echo "ERROR: No hosts files found!"; exit 1; }
+          ls -la fcm_*.hosts
+          sed -n '1,24p' fcm_dual.hosts
 
       - name: Guard publish scope
         run: |
@@ -133,27 +62,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit and Push
+      - name: Commit and push
         run: |
-          # 添加 hosts 文件
-          git add fcm_ipv4.hosts fcm_dual.hosts fcm_ipv6.hosts 2>/dev/null || true
-
-          # 检查是否有变更
+          git add fcm_ipv4.hosts fcm_ipv6.hosts fcm_dual.hosts
           if git diff --cached --quiet; then
             echo "No changes, skipping commit"
             exit 0
           fi
-
-          # 获取上一次提交的作者
-          LAST_AUTHOR=$(git log -1 --format="%an")
           COMMIT_MSG="Update FCM hosts - $(date -u +'%Y-%m-%d %H:%M UTC')"
-
-          if [ "$LAST_AUTHOR" = "github-actions[bot]" ]; then
-            echo "Last commit was by bot, amending..."
+          if [ "$(git log -1 --format='%an')" = "github-actions[bot]" ]; then
             git commit --amend -m "$COMMIT_MSG"
             git push --force-with-lease origin main
           else
-            echo "Last commit was by user, creating new commit..."
             git commit -m "$COMMIT_MSG"
             git push origin main
           fi
